@@ -1,0 +1,17 @@
+{
+  "health": {"status":"healthy","service":"claude-relay-service","version":"1.1.303","redis_status":"healthy"},
+  "user": {
+    "name":"demo-user",
+    "is_active":true,
+    "is_activated":true,
+    "expires_at":null,
+    "permissions":["openai"],
+    "total":{"requests":27213,"input_tokens":330690706,"output_tokens":11331086,"cache_read_tokens":3041691392,"all_tokens":3383713184,"cost":3387.51,"formatted_cost":"$3387.51"},
+    "limits":{"daily_cost_limit":0.0,"total_cost_limit":0.0,"current_daily_cost":205.29,"current_total_cost":3387.51,"concurrency_limit":0,"rate_limit_window":0,"rate_limit_requests":0,"rate_limit_cost":0.0}
+  },
+  "daily":[{"model":"gpt-5.5","requests":628,"input_tokens":33949962,"output_tokens":226809,"cache_read_tokens":52857088,"all_tokens":87033859,"cost":202.98,"formatted_cost":"$202.98"}],
+  "monthly":[{"model":"gpt-5.5","requests":12253,"input_tokens":228658869,"output_tokens":5109038,"cache_read_tokens":1347577472,"all_tokens":1581345379,"cost":2021.30,"formatted_cost":"$2021.30"}],
+  "pool_visible": false,
+  "last_error": null,
+  "fetched_at": "2026-05-22T14:00:00Z"
+}
