@@ -8,11 +8,8 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
-    symbols,
     text::{Line, Span},
-    widgets::{
-        Block, BorderType, Borders, Cell, Paragraph, RenderDirection, Row, Sparkline, Table,
-    },
+    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table},
 };
 use std::time::Duration;
 
@@ -26,17 +23,6 @@ const ANSI_BLUE: &str = "\x1b[38;5;39m";
 const ANSI_DIM: &str = "\x1b[38;5;244m";
 const ANSI_BOLD: &str = "\x1b[1m";
 const TREND_BUCKET_SECS: u64 = 30;
-const THIN_BAR_SET: symbols::bar::Set<'static> = symbols::bar::Set {
-    full: "┃",
-    seven_eighths: "┃",
-    three_quarters: "┃",
-    five_eighths: "┃",
-    half: "╹",
-    three_eighths: "╹",
-    one_quarter: "╵",
-    one_eighth: "╵",
-    empty: " ",
-};
 
 pub fn render_once_text(snapshot: &Snapshot, refresh_secs: f64, width: u16) -> String {
     let status = build_status(snapshot);
@@ -370,25 +356,40 @@ fn sparkline_width(area: Rect) -> usize {
 fn render_trend_sparkline(
     frame: &mut Frame<'_>,
     area: Rect,
-    mut data: Vec<u64>,
+    data: Vec<u64>,
     title: String,
     color: Color,
 ) {
-    if data.is_empty() {
-        data.push(0);
+    frame.render_widget(panel_block(&title, color), area);
+    let inner = area.inner(Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    if inner.is_empty() || data.is_empty() {
+        return;
     }
-    data.reverse();
     let max = data.iter().copied().max().unwrap_or(0).max(1);
-    frame.render_widget(
-        Sparkline::default()
-            .data(data)
-            .max(max)
-            .direction(RenderDirection::RightToLeft)
-            .bar_set(THIN_BAR_SET)
-            .style(Style::default().fg(color))
-            .block(panel_block(&title, color)),
-        area,
-    );
+    let max_columns = inner.width as usize;
+    let visible_start = data.len().saturating_sub(max_columns);
+    let visible = &data[visible_start..];
+    let start_x = inner.right().saturating_sub(visible.len() as u16);
+    let style = Style::default().fg(color);
+    let buffer = frame.buffer_mut();
+
+    for (i, value) in visible.iter().enumerate() {
+        if *value == 0 {
+            continue;
+        }
+        let height = ((*value as f64 / max as f64) * inner.height as f64)
+            .ceil()
+            .clamp(1.0, inner.height as f64) as u16;
+        let x = start_x + i as u16;
+        for y in inner.bottom().saturating_sub(height)..inner.bottom() {
+            if let Some(cell) = buffer.cell_mut((x, y)) {
+                cell.set_symbol("│").set_style(style);
+            }
+        }
+    }
 }
 
 fn total_widget(snapshot: &Snapshot) -> Paragraph<'_> {
@@ -655,12 +656,12 @@ fn signed_cents(value: Option<u64>) -> String {
         .unwrap_or_else(|| "collecting".to_string())
 }
 
-fn trend_window_label(data: &[u64], bucket: Duration) -> String {
-    let seconds = data.len().max(1) as u64 * bucket.as_secs().max(1);
+fn trend_window_label(_data: &[u64], bucket: Duration) -> String {
+    let seconds = bucket.as_secs().max(1);
     if seconds >= 60 {
-        format!("{}m", seconds / 60)
+        format!("{}m/b", seconds / 60)
     } else {
-        format!("{}s", seconds)
+        format!("{}s/b", seconds)
     }
 }
 

@@ -127,3 +127,39 @@ fn time_buckets_keep_sparse_activity_visible() {
         vec![4]
     );
 }
+
+#[test]
+fn time_buckets_do_not_add_trailing_idle_columns() {
+    let mut history = TrendHistory::new(8);
+    let start = Instant::now();
+    let mut snapshot = sample_snapshot();
+    history.push_snapshot(&snapshot, start);
+
+    snapshot.user.total.requests += 4;
+    history.push_snapshot(&snapshot, start + Duration::from_secs(2));
+    history.push_snapshot(&snapshot, start + Duration::from_secs(62));
+
+    assert_eq!(
+        history.request_time_buckets(4, Duration::from_secs(30)),
+        vec![4]
+    );
+}
+
+#[test]
+fn time_buckets_keep_fixed_bucket_membership_during_idle_refreshes() {
+    let mut history = TrendHistory::new(8);
+    let start = Instant::now();
+    let mut snapshot = sample_snapshot();
+    history.push_snapshot(&snapshot, start);
+
+    snapshot.user.total.requests += 4;
+    history.push_snapshot(&snapshot, start + Duration::from_secs(2));
+    snapshot.user.total.requests += 3;
+    history.push_snapshot(&snapshot, start + Duration::from_secs(25));
+    history.push_snapshot(&snapshot, start + Duration::from_secs(33));
+
+    assert_eq!(
+        history.request_time_buckets(4, Duration::from_secs(30)),
+        vec![7]
+    );
+}

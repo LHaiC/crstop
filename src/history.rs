@@ -139,24 +139,31 @@ impl TrendHistory {
         if max_bars == 0 || bucket.is_zero() || self.samples.len() < 2 {
             return Vec::new();
         }
-        let latest = self.samples.back().expect("len checked").fetched_at;
-        let bucket_secs = bucket.as_secs_f64();
-        let mut buckets = vec![0; max_bars];
+        let origin = self.samples.front().expect("len checked").fetched_at;
+        let bucket_nanos = bucket.as_nanos().max(1);
+        let mut buckets = Vec::<(u128, u64)>::new();
         for (previous, current) in self.samples.iter().zip(self.samples.iter().skip(1)) {
-            let seconds_ago = latest
-                .saturating_duration_since(current.fetched_at)
-                .as_secs_f64();
-            let buckets_from_right = (seconds_ago / bucket_secs).floor() as usize;
-            if buckets_from_right >= max_bars {
+            let delta = value(current).saturating_sub(value(previous));
+            if delta == 0 {
                 continue;
             }
-            let index = max_bars - 1 - buckets_from_right;
-            buckets[index] += value(current).saturating_sub(value(previous));
+            let bucket_index = current
+                .fetched_at
+                .saturating_duration_since(origin)
+                .as_nanos()
+                / bucket_nanos;
+            match buckets.last_mut() {
+                Some((existing_index, total)) if *existing_index == bucket_index => {
+                    *total += delta;
+                }
+                _ => buckets.push((bucket_index, delta)),
+            }
         }
-        match buckets.iter().position(|value| *value > 0) {
-            Some(first_nonzero) => buckets[first_nonzero..].to_vec(),
-            None => vec![0],
+        if buckets.is_empty() {
+            return vec![0];
         }
+        let start = buckets.len().saturating_sub(max_bars);
+        buckets[start..].iter().map(|(_, total)| *total).collect()
     }
 }
 

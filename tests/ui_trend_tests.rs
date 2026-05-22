@@ -149,3 +149,28 @@ fn live_trend_height_grows_with_terminal_height() {
     assert!(small_height >= 7);
     assert!(tall_height > small_height);
 }
+
+#[test]
+fn live_trend_uses_continuous_thin_bars_without_partial_glyphs() {
+    let mut snapshot = sample_snapshot();
+    let start = Instant::now();
+    let mut history = TrendHistory::new(16);
+    history.push_snapshot(&snapshot, start);
+
+    snapshot.user.total.requests += 8;
+    history.push_snapshot(&snapshot, start + Duration::from_secs(2));
+    snapshot.user.total.requests += 3;
+    history.push_snapshot(&snapshot, start + Duration::from_secs(32));
+
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| render_dashboard(frame, &snapshot, 1.0, "masked-key", true, false, &history))
+        .unwrap();
+
+    let text = screen_text(&terminal);
+    assert!(text.contains("│"));
+    assert!(!text.contains("╵"));
+    assert!(!text.contains("┃"));
+    assert!(!text.contains("█"));
+}
