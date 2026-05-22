@@ -13,8 +13,9 @@
 ## Usage
 
 ```bash
-crstop              # full-screen TUI, refresh every 5 seconds
-crstop --refresh 2  # faster refresh
+crstop                # full-screen TUI, refresh every 1 second
+crstop --refresh 2    # refresh every 2 seconds
+crstop --refresh 0.5  # faster half-second refresh
 crstop --once       # one terminal snapshot, no fullscreen
 crstop --config PATH
 crstop --no-cache

@@ -1,15 +1,20 @@
 use crate::{
     app::build_status,
     format::{comma, compact_number, display_cost, dollars, sorted_models},
+    history::TrendHistory,
     model::{ModelStat, Snapshot},
 };
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
+    symbols,
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table},
+    widgets::{
+        Block, BorderType, Borders, Cell, Paragraph, RenderDirection, Row, Sparkline, Table,
+    },
 };
+use std::time::Duration;
 
 const ANSI_RESET: &str = "\x1b[0m";
 const ANSI_CYAN: &str = "\x1b[38;5;45m";
@@ -20,8 +25,20 @@ const ANSI_PURPLE: &str = "\x1b[38;5;141m";
 const ANSI_BLUE: &str = "\x1b[38;5;39m";
 const ANSI_DIM: &str = "\x1b[38;5;244m";
 const ANSI_BOLD: &str = "\x1b[1m";
+const TREND_BUCKET_SECS: u64 = 30;
+const THIN_BAR_SET: symbols::bar::Set<'static> = symbols::bar::Set {
+    full: "┃",
+    seven_eighths: "┃",
+    three_quarters: "┃",
+    five_eighths: "┃",
+    half: "╹",
+    three_eighths: "╹",
+    one_quarter: "╵",
+    one_eighth: "╵",
+    empty: " ",
+};
 
-pub fn render_once_text(snapshot: &Snapshot, refresh_secs: u64, width: u16) -> String {
+pub fn render_once_text(snapshot: &Snapshot, refresh_secs: f64, width: u16) -> String {
     let status = build_status(snapshot);
     let mut out = String::new();
     let status_color = ansi_status_color(&status.level);
@@ -32,7 +49,7 @@ pub fn render_once_text(snapshot: &Snapshot, refresh_secs: u64, width: u16) -> S
         snapshot.health.status,
         snapshot.health.version.as_deref().unwrap_or("-"),
         snapshot.health.redis_status.as_deref().unwrap_or("-"),
-        refresh_secs,
+        format_secs(refresh_secs),
         snapshot.fetched_at
     ));
     out.push_str(
@@ -169,10 +186,11 @@ fn push_model_section(out: &mut String, title: &str, rows: &[ModelStat], detaile
 pub fn render_dashboard(
     frame: &mut Frame<'_>,
     snapshot: &Snapshot,
-    refresh_secs: u64,
+    refresh_secs: f64,
     masked_key: &str,
     detailed_daily: bool,
     detailed_monthly: bool,
+    trend: &TrendHistory,
 ) {
     let status = build_status(snapshot);
     let color = match status.level.as_str() {
@@ -181,15 +199,29 @@ pub fn render_dashboard(
         _ => Color::Rgb(255, 70, 70),
     };
     let root = frame.area();
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Length(8),
-            Constraint::Min(8),
-            Constraint::Length(8),
-        ])
-        .split(root);
+    let trend_height = trend_height(root.height);
+    let chunks = if let Some(trend_height) = trend_height {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(8),
+                Constraint::Length(trend_height),
+                Constraint::Min(8),
+                Constraint::Length(6),
+            ])
+            .split(root)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(8),
+                Constraint::Min(8),
+                Constraint::Length(8),
+            ])
+            .split(root)
+    };
     let top = Paragraph::new(Line::from(vec![
         Span::styled(
             "▰ crstop ",
@@ -207,7 +239,7 @@ pub fn render_dashboard(
             snapshot.health.version.as_deref().unwrap_or("-"),
             snapshot.health.redis_status.as_deref().unwrap_or("-"),
             masked_key,
-            refresh_secs,
+            format_secs(refresh_secs),
             snapshot.fetched_at
         )),
     ]))
@@ -222,10 +254,25 @@ pub fn render_dashboard(
     frame.render_widget(total_widget(snapshot), mid[0]);
     frame.render_widget(limits_widget(snapshot), mid[1]);
 
+    let table_area = if trend_height.is_some() {
+        chunks[3]
+    } else {
+        chunks[2]
+    };
+    let log_area = if trend_height.is_some() {
+        chunks[4]
+    } else {
+        chunks[3]
+    };
+
+    if trend_height.is_some() {
+        render_trend_panel(frame, chunks[2], trend);
+    }
+
     let tables = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(chunks[2]);
+        .split(table_area);
     frame.render_widget(
         model_table("TODAY BY MODEL", &snapshot.daily, detailed_daily),
         tables[0],
@@ -249,7 +296,98 @@ pub fn render_dashboard(
         Paragraph::new(log_text)
             .style(Style::default().fg(Color::Rgb(220, 225, 235)))
             .block(panel_block(" STATUS LOG ", Color::Rgb(60, 160, 255))),
-        chunks[3],
+        log_area,
+    );
+}
+
+fn render_trend_panel(frame: &mut Frame<'_>, area: Rect, trend: &TrendHistory) {
+    frame.render_widget(panel_block(" LIVE TREND ", Color::Rgb(0, 215, 255)), area);
+    let inner = area.inner(Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(34),
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+        ])
+        .split(inner);
+
+    let bucket = Duration::from_secs(TREND_BUCKET_SECS);
+    let request_buckets = trend.request_time_buckets(sparkline_width(columns[0]), bucket);
+    let token_buckets = trend.token_time_buckets(sparkline_width(columns[1]), bucket);
+    let cost_buckets = trend.cost_time_buckets(sparkline_width(columns[2]), bucket);
+
+    render_trend_sparkline(
+        frame,
+        columns[0],
+        request_buckets.clone(),
+        format!(
+            " REQ {} {} ",
+            trend_window_label(&request_buckets, bucket),
+            signed_count(Some(request_buckets.iter().copied().sum()))
+        ),
+        Color::Rgb(60, 160, 255),
+    );
+    render_trend_sparkline(
+        frame,
+        columns[1],
+        token_buckets.clone(),
+        format!(
+            " TOKENS {} {} ",
+            trend_window_label(&token_buckets, bucket),
+            signed_compact(Some(token_buckets.iter().copied().sum()))
+        ),
+        Color::Rgb(0, 215, 255),
+    );
+    render_trend_sparkline(
+        frame,
+        columns[2],
+        cost_buckets.clone(),
+        format!(
+            " COST {} {} ",
+            trend_window_label(&cost_buckets, bucket),
+            signed_cents(Some(cost_buckets.iter().copied().sum()))
+        ),
+        Color::Rgb(0, 255, 135),
+    );
+}
+
+fn trend_height(total_height: u16) -> Option<u16> {
+    if total_height < 30 {
+        None
+    } else {
+        Some((total_height / 5).clamp(7, 18))
+    }
+}
+
+fn sparkline_width(area: Rect) -> usize {
+    area.width.saturating_sub(2).max(1) as usize
+}
+
+fn render_trend_sparkline(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    mut data: Vec<u64>,
+    title: String,
+    color: Color,
+) {
+    if data.is_empty() {
+        data.push(0);
+    }
+    data.reverse();
+    let max = data.iter().copied().max().unwrap_or(0).max(1);
+    frame.render_widget(
+        Sparkline::default()
+            .data(data)
+            .max(max)
+            .direction(RenderDirection::RightToLeft)
+            .bar_set(THIN_BAR_SET)
+            .style(Style::default().fg(color))
+            .block(panel_block(&title, color)),
+        area,
     );
 }
 
@@ -496,6 +634,41 @@ fn truncate(value: &str, width: usize) -> String {
         let mut s: String = value.chars().take(width.saturating_sub(1)).collect();
         s.push('…');
         s
+    }
+}
+
+fn signed_count(value: Option<u64>) -> String {
+    value
+        .map(|v| format!("+{}", comma(v)))
+        .unwrap_or_else(|| "collecting".to_string())
+}
+
+fn signed_compact(value: Option<u64>) -> String {
+    value
+        .map(|v| format!("+{}", compact_number(v)))
+        .unwrap_or_else(|| "collecting".to_string())
+}
+
+fn signed_cents(value: Option<u64>) -> String {
+    value
+        .map(|cents| format!("+${:.2}", cents as f64 / 100.0))
+        .unwrap_or_else(|| "collecting".to_string())
+}
+
+fn trend_window_label(data: &[u64], bucket: Duration) -> String {
+    let seconds = data.len().max(1) as u64 * bucket.as_secs().max(1);
+    if seconds >= 60 {
+        format!("{}m", seconds / 60)
+    } else {
+        format!("{}s", seconds)
+    }
+}
+
+fn format_secs(value: f64) -> String {
+    if (value.fract()).abs() < f64::EPSILON {
+        format!("{value:.0}")
+    } else {
+        format!("{value:.1}")
     }
 }
 

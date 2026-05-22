@@ -9,6 +9,7 @@ use crstop::{
     app::status_exit_code,
     client::CrsClient,
     config::{load_settings, mask_key},
+    history::TrendHistory,
     model::Snapshot,
     ui::{render_dashboard, render_once_text},
 };
@@ -24,8 +25,8 @@ use std::{
 struct Args {
     #[arg(long)]
     config: Option<PathBuf>,
-    #[arg(long, default_value_t = 5)]
-    refresh: u64,
+    #[arg(long, default_value_t = 1.0)]
+    refresh: f64,
     #[arg(long)]
     once: bool,
     #[arg(long)]
@@ -36,7 +37,7 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let refresh = args.refresh.max(1);
+    let refresh = normalize_refresh_secs(args.refresh);
 
     if let Some(path) = &args.fixture {
         let snapshot: Snapshot = serde_json::from_str(
@@ -62,7 +63,7 @@ fn main() -> Result<()> {
 fn run_tui(
     client: CrsClient,
     settings: crstop::config::Settings,
-    refresh: u64,
+    refresh: f64,
     no_cache: bool,
 ) -> Result<()> {
     enable_raw_mode()?;
@@ -73,6 +74,10 @@ fn run_tui(
     let masked = mask_key(&settings.api_key);
     let mut snapshot = client.snapshot(&settings, no_cache).ok();
     let mut last_refresh = Instant::now();
+    let mut trend = TrendHistory::new(1_800);
+    if let Some(snap) = &snapshot {
+        trend.push_snapshot(snap, last_refresh);
+    }
     let mut detailed_daily = true;
     let mut detailed_monthly = false;
 
@@ -86,11 +91,12 @@ fn run_tui(
                     &masked,
                     detailed_daily,
                     detailed_monthly,
+                    &trend,
                 );
             }
         })?;
 
-        let timeout = Duration::from_millis(200);
+        let timeout = Duration::from_millis(100);
         if event::poll(timeout)?
             && let Event::Key(key) = event::read()?
             && key.kind == KeyEventKind::Press
@@ -101,8 +107,14 @@ fn run_tui(
                     break Ok(());
                 }
                 KeyCode::Char('r') => {
-                    snapshot = refresh_snapshot(&client, &settings, no_cache, snapshot);
-                    last_refresh = Instant::now();
+                    let now = Instant::now();
+                    let (next_snapshot, fresh) =
+                        refresh_snapshot(&client, &settings, no_cache, snapshot);
+                    snapshot = next_snapshot;
+                    if fresh && let Some(snap) = &snapshot {
+                        trend.push_snapshot(snap, now);
+                    }
+                    last_refresh = now;
                 }
                 KeyCode::Char('d') => detailed_daily = !detailed_daily,
                 KeyCode::Char('m') => detailed_monthly = !detailed_monthly,
@@ -110,9 +122,14 @@ fn run_tui(
             }
         }
 
-        if last_refresh.elapsed() >= Duration::from_secs(refresh) {
-            snapshot = refresh_snapshot(&client, &settings, no_cache, snapshot);
-            last_refresh = Instant::now();
+        if last_refresh.elapsed() >= Duration::from_secs_f64(refresh) {
+            let now = Instant::now();
+            let (next_snapshot, fresh) = refresh_snapshot(&client, &settings, no_cache, snapshot);
+            snapshot = next_snapshot;
+            if fresh && let Some(snap) = &snapshot {
+                trend.push_snapshot(snap, now);
+            }
+            last_refresh = now;
         }
     };
 
@@ -122,17 +139,28 @@ fn run_tui(
     result
 }
 
+fn normalize_refresh_secs(value: f64) -> f64 {
+    if value.is_finite() && value > 0.0 {
+        value.max(0.1)
+    } else {
+        1.0
+    }
+}
+
 fn refresh_snapshot(
     client: &CrsClient,
     settings: &crstop::config::Settings,
     no_cache: bool,
     previous: Option<Snapshot>,
-) -> Option<Snapshot> {
+) -> (Option<Snapshot>, bool) {
     match client.snapshot(settings, no_cache) {
-        Ok(snap) => Some(snap),
-        Err(err) => previous.map(|mut snap| {
-            snap.last_error = Some(err.to_string());
-            snap
-        }),
+        Ok(snap) => (Some(snap), true),
+        Err(err) => (
+            previous.map(|mut snap| {
+                snap.last_error = Some(err.to_string());
+                snap
+            }),
+            false,
+        ),
     }
 }
