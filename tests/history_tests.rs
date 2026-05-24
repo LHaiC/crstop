@@ -100,7 +100,7 @@ fn buckets_long_history_into_visible_window_totals() {
 }
 
 #[test]
-fn time_buckets_keep_sparse_activity_visible() {
+fn time_buckets_wait_until_bucket_is_complete() {
     let mut history = TrendHistory::new(8);
     let start = Instant::now();
     let mut snapshot = sample_snapshot();
@@ -113,6 +113,13 @@ fn time_buckets_keep_sparse_activity_visible() {
 
     let idle = snapshot.clone();
     history.push_snapshot(&idle, start + Duration::from_secs(29));
+
+    assert_eq!(
+        history.request_time_buckets(4, Duration::from_secs(30)),
+        vec![0]
+    );
+
+    history.push_snapshot(&idle, start + Duration::from_secs(31));
 
     assert_eq!(
         history.request_time_buckets(4, Duration::from_secs(30)),
@@ -161,5 +168,24 @@ fn time_buckets_keep_fixed_bucket_membership_during_idle_refreshes() {
     assert_eq!(
         history.request_time_buckets(4, Duration::from_secs(30)),
         vec![7]
+    );
+}
+
+#[test]
+fn time_buckets_exclude_current_incomplete_bucket() {
+    let mut history = TrendHistory::new(8);
+    let start = Instant::now();
+    let mut snapshot = sample_snapshot();
+    history.push_snapshot(&snapshot, start);
+
+    snapshot.user.total.requests += 4;
+    history.push_snapshot(&snapshot, start + Duration::from_secs(2));
+    snapshot.user.total.requests += 3;
+    history.push_snapshot(&snapshot, start + Duration::from_secs(32));
+    history.push_snapshot(&snapshot, start + Duration::from_secs(40));
+
+    assert_eq!(
+        history.request_time_buckets(4, Duration::from_secs(30)),
+        vec![4]
     );
 }

@@ -141,6 +141,14 @@ impl TrendHistory {
         }
         let origin = self.samples.front().expect("len checked").fetched_at;
         let bucket_nanos = bucket.as_nanos().max(1);
+        let active_bucket = self
+            .samples
+            .back()
+            .expect("len checked")
+            .fetched_at
+            .saturating_duration_since(origin)
+            .as_nanos()
+            / bucket_nanos;
         let mut buckets = Vec::<(u128, u64)>::new();
         for (previous, current) in self.samples.iter().zip(self.samples.iter().skip(1)) {
             let delta = value(current).saturating_sub(value(previous));
@@ -152,6 +160,9 @@ impl TrendHistory {
                 .saturating_duration_since(origin)
                 .as_nanos()
                 / bucket_nanos;
+            if bucket_index >= active_bucket {
+                continue;
+            }
             match buckets.last_mut() {
                 Some((existing_index, total)) if *existing_index == bucket_index => {
                     *total += delta;

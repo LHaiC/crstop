@@ -64,6 +64,7 @@ fn dashboard_renders_live_trend_panel_when_history_has_deltas() {
     let mut history = TrendHistory::new(16);
     history.push_snapshot(&first, start);
     history.push_snapshot(&second, start + Duration::from_secs(5));
+    history.push_snapshot(&second, start + Duration::from_secs(31));
 
     let backend = TestBackend::new(120, 32);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -94,6 +95,7 @@ fn live_trend_places_latest_bar_at_right_edge() {
     let mut history = TrendHistory::new(16);
     history.push_snapshot(&first, start);
     history.push_snapshot(&second, start + Duration::from_millis(500));
+    history.push_snapshot(&second, start + Duration::from_secs(31));
 
     let backend = TestBackend::new(120, 32);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -161,6 +163,7 @@ fn live_trend_uses_continuous_thin_bars_without_partial_glyphs() {
     history.push_snapshot(&snapshot, start + Duration::from_secs(2));
     snapshot.user.total.requests += 3;
     history.push_snapshot(&snapshot, start + Duration::from_secs(32));
+    history.push_snapshot(&snapshot, start + Duration::from_secs(62));
 
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -169,8 +172,72 @@ fn live_trend_uses_continuous_thin_bars_without_partial_glyphs() {
         .unwrap();
 
     let text = screen_text(&terminal);
-    assert!(text.contains("│"));
+    assert!(text.contains("▏"));
     assert!(!text.contains("╵"));
     assert!(!text.contains("┃"));
     assert!(!text.contains("█"));
+}
+
+#[test]
+fn live_trend_clears_stale_tall_bar_cells_between_frames() {
+    let mut snapshot = sample_snapshot();
+    let start = Instant::now();
+    let mut first_history = TrendHistory::new(16);
+    first_history.push_snapshot(&snapshot, start);
+    snapshot.user.total.requests += 8;
+    first_history.push_snapshot(&snapshot, start + Duration::from_secs(2));
+    first_history.push_snapshot(&snapshot, start + Duration::from_secs(31));
+
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| {
+            render_dashboard(
+                frame,
+                &snapshot,
+                1.0,
+                "masked-key",
+                true,
+                false,
+                &first_history,
+            )
+        })
+        .unwrap();
+
+    let mut second_history = first_history.clone();
+    snapshot.user.total.requests += 3;
+    second_history.push_snapshot(&snapshot, start + Duration::from_secs(32));
+    second_history.push_snapshot(&snapshot, start + Duration::from_secs(62));
+    terminal
+        .draw(|frame| {
+            render_dashboard(
+                frame,
+                &snapshot,
+                1.0,
+                "masked-key",
+                true,
+                false,
+                &second_history,
+            )
+        })
+        .unwrap();
+
+    let grid = screen_grid(&terminal);
+    let (title_y, title_x) = grid
+        .iter()
+        .enumerate()
+        .find_map(|(y, row)| {
+            find_sequence(row, &["R", "E", "Q", " ", "3", "0", "s"]).map(|x| (y, x))
+        })
+        .unwrap();
+    let right_border_x = grid[title_y][title_x..]
+        .iter()
+        .position(|cell| cell == "╮")
+        .map(|offset| title_x + offset)
+        .unwrap();
+    let right_inner_x = right_border_x - 1;
+
+    assert_eq!(grid[title_y + 1][right_inner_x], " ");
+    assert_eq!(grid[title_y + 2][right_inner_x], " ");
+    assert_eq!(grid[title_y + 3][right_inner_x], "▏");
 }

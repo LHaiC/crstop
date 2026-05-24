@@ -23,6 +23,7 @@ const ANSI_BLUE: &str = "\x1b[38;5;39m";
 const ANSI_DIM: &str = "\x1b[38;5;244m";
 const ANSI_BOLD: &str = "\x1b[1m";
 const TREND_BUCKET_SECS: u64 = 30;
+const TREND_BAR_SYMBOL: &str = "▏";
 
 pub fn render_once_text(snapshot: &Snapshot, refresh_secs: f64, width: u16) -> String {
     let status = build_status(snapshot);
@@ -376,6 +377,14 @@ fn render_trend_sparkline(
     let style = Style::default().fg(color);
     let buffer = frame.buffer_mut();
 
+    for y in inner.top()..inner.bottom() {
+        for x in inner.left()..inner.right() {
+            if let Some(cell) = buffer.cell_mut((x, y)) {
+                cell.set_symbol(" ");
+            }
+        }
+    }
+
     for (i, value) in visible.iter().enumerate() {
         if *value == 0 {
             continue;
@@ -386,7 +395,7 @@ fn render_trend_sparkline(
         let x = start_x + i as u16;
         for y in inner.bottom().saturating_sub(height)..inner.bottom() {
             if let Some(cell) = buffer.cell_mut((x, y)) {
-                cell.set_symbol("│").set_style(style);
+                cell.set_symbol(TREND_BAR_SYMBOL).set_style(style);
             }
         }
     }
