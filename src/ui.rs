@@ -299,11 +299,19 @@ pub fn render_dashboard(
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(table_area);
     frame.render_widget(
-        model_table("TODAY BY MODEL", &snapshot.daily, detailed_daily),
+        model_table(
+            "TODAY BY MODEL",
+            &snapshot.daily,
+            model_table_columns(detailed_daily, tables[0].width),
+        ),
         tables[0],
     );
     frame.render_widget(
-        model_table("MONTH BY MODEL", &snapshot.monthly, detailed_monthly),
+        model_table(
+            "MONTH BY MODEL",
+            &snapshot.monthly,
+            model_table_columns(detailed_monthly, tables[1].width),
+        ),
         tables[1],
     );
 
@@ -533,51 +541,75 @@ fn limits_widget(snapshot: &Snapshot) -> Paragraph<'_> {
     .block(panel_block(" LIMITS ", Color::Rgb(190, 120, 255)))
 }
 
-fn model_table<'a>(title: &'a str, rows: &'a [ModelStat], detailed: bool) -> Table<'a> {
-    let header = if detailed {
-        Row::new(vec![
-            "MODEL", "REQ", "INPUT", "OUTPUT", "CACHE", "ALL", "COST",
-        ])
-        .style(
-            Style::default()
-                .fg(Color::Rgb(0, 215, 255))
-                .add_modifier(Modifier::BOLD),
-        )
+#[derive(Clone, Copy)]
+enum ModelTableColumns {
+    Full,
+    NoCache,
+    Core,
+}
+
+fn model_table_columns(detailed: bool, width: u16) -> ModelTableColumns {
+    if !detailed {
+        return ModelTableColumns::Core;
+    }
+    if width >= 64 {
+        ModelTableColumns::Full
+    } else if width >= 52 {
+        ModelTableColumns::NoCache
     } else {
-        Row::new(vec!["MODEL", "REQ", "ALL", "COST"]).style(
-            Style::default()
-                .fg(Color::Rgb(0, 215, 255))
-                .add_modifier(Modifier::BOLD),
-        )
-    };
+        ModelTableColumns::Core
+    }
+}
+
+fn model_table<'a>(title: &'a str, rows: &'a [ModelStat], columns: ModelTableColumns) -> Table<'a> {
+    let header = match columns {
+        ModelTableColumns::Full => Row::new(vec![
+            "MODEL", "REQ", "INPUT", "OUTPUT", "CACHE", "ALL", "COST",
+        ]),
+        ModelTableColumns::NoCache => {
+            Row::new(vec!["MODEL", "REQ", "INPUT", "OUTPUT", "ALL", "COST"])
+        }
+        ModelTableColumns::Core => Row::new(vec!["MODEL", "REQ", "ALL", "COST"]),
+    }
+    .style(
+        Style::default()
+            .fg(Color::Rgb(0, 215, 255))
+            .add_modifier(Modifier::BOLD),
+    );
     let table_rows: Vec<Row> = sorted_models(rows)
         .into_iter()
         .take(12)
-        .map(|r| {
-            if detailed {
-                Row::new(vec![
-                    Cell::from(r.model).style(Style::default().fg(Color::Rgb(0, 215, 255))),
-                    Cell::from(comma(r.requests)),
-                    Cell::from(compact_number(r.input_tokens)),
-                    Cell::from(compact_number(r.output_tokens)),
-                    Cell::from(compact_number(r.cache_read_tokens)),
-                    Cell::from(compact_number(r.all_tokens)),
-                    Cell::from(display_cost(r.cost, &r.formatted_cost))
-                        .style(Style::default().fg(Color::Rgb(0, 255, 135))),
-                ])
-            } else {
-                Row::new(vec![
-                    Cell::from(r.model).style(Style::default().fg(Color::Rgb(0, 215, 255))),
-                    Cell::from(comma(r.requests)),
-                    Cell::from(compact_number(r.all_tokens)),
-                    Cell::from(display_cost(r.cost, &r.formatted_cost))
-                        .style(Style::default().fg(Color::Rgb(0, 255, 135))),
-                ])
-            }
+        .map(|r| match columns {
+            ModelTableColumns::Full => Row::new(vec![
+                Cell::from(r.model).style(Style::default().fg(Color::Rgb(0, 215, 255))),
+                Cell::from(comma(r.requests)),
+                Cell::from(compact_number(r.input_tokens)),
+                Cell::from(compact_number(r.output_tokens)),
+                Cell::from(compact_number(r.cache_read_tokens)),
+                Cell::from(compact_number(r.all_tokens)),
+                Cell::from(display_cost(r.cost, &r.formatted_cost))
+                    .style(Style::default().fg(Color::Rgb(0, 255, 135))),
+            ]),
+            ModelTableColumns::NoCache => Row::new(vec![
+                Cell::from(r.model).style(Style::default().fg(Color::Rgb(0, 215, 255))),
+                Cell::from(comma(r.requests)),
+                Cell::from(compact_number(r.input_tokens)),
+                Cell::from(compact_number(r.output_tokens)),
+                Cell::from(compact_number(r.all_tokens)),
+                Cell::from(display_cost(r.cost, &r.formatted_cost))
+                    .style(Style::default().fg(Color::Rgb(0, 255, 135))),
+            ]),
+            ModelTableColumns::Core => Row::new(vec![
+                Cell::from(r.model).style(Style::default().fg(Color::Rgb(0, 215, 255))),
+                Cell::from(comma(r.requests)),
+                Cell::from(compact_number(r.all_tokens)),
+                Cell::from(display_cost(r.cost, &r.formatted_cost))
+                    .style(Style::default().fg(Color::Rgb(0, 255, 135))),
+            ]),
         })
         .collect();
-    let widths: Vec<Constraint> = if detailed {
-        vec![
+    let widths: Vec<Constraint> = match columns {
+        ModelTableColumns::Full => vec![
             Constraint::Min(12),
             Constraint::Length(7),
             Constraint::Length(8),
@@ -585,14 +617,21 @@ fn model_table<'a>(title: &'a str, rows: &'a [ModelStat], detailed: bool) -> Tab
             Constraint::Length(8),
             Constraint::Length(8),
             Constraint::Length(10),
-        ]
-    } else {
-        vec![
+        ],
+        ModelTableColumns::NoCache => vec![
+            Constraint::Min(12),
+            Constraint::Length(7),
+            Constraint::Length(8),
+            Constraint::Length(8),
+            Constraint::Length(8),
+            Constraint::Length(10),
+        ],
+        ModelTableColumns::Core => vec![
             Constraint::Min(16),
             Constraint::Length(7),
             Constraint::Length(10),
             Constraint::Length(10),
-        ]
+        ],
     };
     Table::new(table_rows, widths)
         .header(header)
