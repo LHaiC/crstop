@@ -11,7 +11,7 @@ use crstop::{
     config::{load_settings, mask_key},
     history::TrendHistory,
     model::Snapshot,
-    ui::{render_dashboard, render_once_text},
+    ui::{render_dashboard, render_error_dashboard, render_once_text},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
@@ -72,28 +72,27 @@ fn run_tui(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let masked = mask_key(&settings.api_key);
-    let mut snapshot = client.snapshot(&settings, no_cache).ok();
     let mut last_refresh = Instant::now();
+    let mut snapshot = refresh_snapshot(&client, &settings, no_cache);
     let mut trend = TrendHistory::new(1_800);
-    if let Some(snap) = &snapshot {
+    if let Ok(snap) = &snapshot {
         trend.push_snapshot(snap, last_refresh);
     }
     let mut detailed_daily = true;
     let mut detailed_monthly = false;
 
     let result = loop {
-        terminal.draw(|frame| {
-            if let Some(snap) = &snapshot {
-                render_dashboard(
-                    frame,
-                    snap,
-                    refresh,
-                    &masked,
-                    detailed_daily,
-                    detailed_monthly,
-                    &trend,
-                );
-            }
+        terminal.draw(|frame| match &snapshot {
+            Ok(snap) => render_dashboard(
+                frame,
+                snap,
+                refresh,
+                &masked,
+                detailed_daily,
+                detailed_monthly,
+                &trend,
+            ),
+            Err(err) => render_error_dashboard(frame, err),
         })?;
 
         let timeout = Duration::from_millis(100);
@@ -108,10 +107,8 @@ fn run_tui(
                 }
                 KeyCode::Char('r') => {
                     let now = Instant::now();
-                    let (next_snapshot, fresh) =
-                        refresh_snapshot(&client, &settings, no_cache, snapshot);
-                    snapshot = next_snapshot;
-                    if fresh && let Some(snap) = &snapshot {
+                    snapshot = refresh_snapshot(&client, &settings, no_cache);
+                    if let Ok(snap) = &snapshot {
                         trend.push_snapshot(snap, now);
                     }
                     last_refresh = now;
@@ -124,9 +121,8 @@ fn run_tui(
 
         if last_refresh.elapsed() >= Duration::from_secs_f64(refresh) {
             let now = Instant::now();
-            let (next_snapshot, fresh) = refresh_snapshot(&client, &settings, no_cache, snapshot);
-            snapshot = next_snapshot;
-            if fresh && let Some(snap) = &snapshot {
+            snapshot = refresh_snapshot(&client, &settings, no_cache);
+            if let Ok(snap) = &snapshot {
                 trend.push_snapshot(snap, now);
             }
             last_refresh = now;
@@ -151,16 +147,8 @@ fn refresh_snapshot(
     client: &CrsClient,
     settings: &crstop::config::Settings,
     no_cache: bool,
-    previous: Option<Snapshot>,
-) -> (Option<Snapshot>, bool) {
-    match client.snapshot(settings, no_cache) {
-        Ok(snap) => (Some(snap), true),
-        Err(err) => (
-            previous.map(|mut snap| {
-                snap.last_error = Some(err.to_string());
-                snap
-            }),
-            false,
-        ),
-    }
+) -> Result<crstop::model::Snapshot, String> {
+    client
+        .snapshot(settings, no_cache)
+        .map_err(|err| err.to_string())
 }

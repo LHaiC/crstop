@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table},
+    widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table, Wrap},
 };
 use std::time::Duration;
 
@@ -168,6 +168,44 @@ fn push_model_section(out: &mut String, title: &str, rows: &[ModelStat], detaile
     if rows.is_empty() {
         out.push_str(&format!("  {ANSI_DIM}no usage records{ANSI_RESET}\n"));
     }
+}
+
+pub fn render_error_dashboard(frame: &mut Frame<'_>, error: &str) {
+    let area = frame.area();
+    let text = vec![
+        Line::from(vec![
+            Span::styled(
+                "▰ crstop ",
+                Style::default()
+                    .fg(Color::Rgb(0, 215, 255))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "startup error",
+                Style::default()
+                    .fg(Color::Rgb(255, 70, 70))
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled(
+                "Initial CRS snapshot failed: ",
+                Style::default().fg(Color::Rgb(255, 216, 0)),
+            ),
+            Span::raw(error.to_string()),
+        ]),
+        Line::raw(""),
+        Line::from(vec![Span::styled(
+            "Press r to retry, q/Esc/Ctrl-C to quit.",
+            Style::default().fg(Color::Rgb(145, 155, 170)),
+        )]),
+    ];
+    let panel = Paragraph::new(text)
+        .style(Style::default().fg(Color::Rgb(220, 225, 235)))
+        .wrap(Wrap { trim: false })
+        .block(panel_block(" startup error ", Color::Rgb(255, 70, 70)));
+    frame.render_widget(panel, area);
 }
 
 pub fn render_dashboard(

@@ -5,7 +5,7 @@
 ## What It Does
 
 - Shows a btop/nvitop-style terminal dashboard for the CRS instance configured by Codex.
-- Reads `~/.codex/config.toml`, derives the CRS root URL, and uses `preferred_auth_method` as the current API key.
+- Reads `~/.codex/config.toml`, derives the CRS root URL, and resolves `preferred_auth_method = "apikey"` through `~/.codex/auth.json` (`OPENAI_API_KEY`).
 - Masks the API key in output and only caches the derived `apiId` under `~/.cache/crstop/api-id.json`.
 - Checks CRS health, Redis status, current key state, total/daily/monthly usage, and key-level limits.
 - Does not send real model requests, so it does not consume model tokens.

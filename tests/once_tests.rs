@@ -29,3 +29,29 @@ fn once_text_uses_colored_dashboard_accents() {
     assert!(text.contains("╰"));
     assert!(text.contains("▰"));
 }
+
+#[test]
+fn startup_error_dashboard_explains_initial_snapshot_failure() {
+    let backend = ratatui::backend::TestBackend::new(80, 10);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+
+    terminal
+        .draw(|frame| {
+            crstop::ui::render_error_dashboard(
+                frame,
+                "POST /apiStats/api/get-key-id: http status 400",
+            )
+        })
+        .unwrap();
+
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(text.contains("crstop"));
+    assert!(text.contains("startup error"));
+    assert!(text.contains("get-key-id"));
+}
