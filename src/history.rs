@@ -15,6 +15,7 @@ struct TrendSample {
 #[derive(Debug, Clone)]
 pub struct TrendHistory {
     max_samples: usize,
+    origin: Option<Instant>,
     samples: VecDeque<TrendSample>,
 }
 
@@ -22,6 +23,7 @@ impl TrendHistory {
     pub fn new(max_samples: usize) -> Self {
         Self {
             max_samples: max_samples.max(2),
+            origin: None,
             samples: VecDeque::new(),
         }
     }
@@ -35,6 +37,9 @@ impl TrendHistory {
     }
 
     pub fn push_snapshot(&mut self, snapshot: &Snapshot, fetched_at: Instant) {
+        if self.origin.is_none() {
+            self.origin = Some(fetched_at);
+        }
         self.samples.push_back(TrendSample {
             fetched_at,
             requests: snapshot.user.total.requests,
@@ -139,9 +144,9 @@ impl TrendHistory {
         if max_bars == 0 || bucket.is_zero() || self.samples.len() < 2 {
             return Vec::new();
         }
-        let origin = self.samples.front().expect("len checked").fetched_at;
+        let origin = self.origin.expect("origin set on first sample");
         let bucket_nanos = bucket.as_nanos().max(1);
-        let active_bucket = self
+        let latest_index = self
             .samples
             .back()
             .expect("len checked")
@@ -149,32 +154,25 @@ impl TrendHistory {
             .saturating_duration_since(origin)
             .as_nanos()
             / bucket_nanos;
-        let mut buckets = Vec::<(u128, u64)>::new();
+        let window = max_bars as u128;
+        let mut buckets = vec![0u64; max_bars];
         for (previous, current) in self.samples.iter().zip(self.samples.iter().skip(1)) {
             let delta = value(current).saturating_sub(value(previous));
             if delta == 0 {
                 continue;
             }
-            let bucket_index = current
+            let index = current
                 .fetched_at
                 .saturating_duration_since(origin)
                 .as_nanos()
                 / bucket_nanos;
-            if bucket_index >= active_bucket {
+            let age = latest_index.saturating_sub(index);
+            if age >= window {
                 continue;
             }
-            match buckets.last_mut() {
-                Some((existing_index, total)) if *existing_index == bucket_index => {
-                    *total += delta;
-                }
-                _ => buckets.push((bucket_index, delta)),
-            }
+            buckets[(window - 1 - age) as usize] += delta;
         }
-        if buckets.is_empty() {
-            return vec![0];
-        }
-        let start = buckets.len().saturating_sub(max_bars);
-        buckets[start..].iter().map(|(_, total)| *total).collect()
+        buckets
     }
 }
 

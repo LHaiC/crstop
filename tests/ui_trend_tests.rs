@@ -107,6 +107,7 @@ fn live_trend_places_latest_bar_at_right_edge() {
     let mut history = TrendHistory::new(16);
     history.push_snapshot(&first, start);
     history.push_snapshot(&second, start + Duration::from_millis(500));
+    second.user.total.requests += 8;
     history.push_snapshot(&second, start + Duration::from_secs(31));
 
     let backend = TestBackend::new(120, 32);
@@ -197,8 +198,8 @@ fn live_trend_clears_stale_tall_bar_cells_between_frames() {
     let mut first_history = TrendHistory::new(16);
     first_history.push_snapshot(&snapshot, start);
     snapshot.user.total.requests += 8;
-    first_history.push_snapshot(&snapshot, start + Duration::from_secs(2));
-    first_history.push_snapshot(&snapshot, start + Duration::from_secs(31));
+    first_history.push_snapshot(&snapshot, start + Duration::from_secs(35));
+    first_history.push_snapshot(&snapshot, start + Duration::from_secs(36));
 
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -217,9 +218,7 @@ fn live_trend_clears_stale_tall_bar_cells_between_frames() {
         .unwrap();
 
     let mut second_history = first_history.clone();
-    snapshot.user.total.requests += 3;
-    second_history.push_snapshot(&snapshot, start + Duration::from_secs(32));
-    second_history.push_snapshot(&snapshot, start + Duration::from_secs(62));
+    second_history.push_snapshot(&snapshot, start + Duration::from_secs(96));
     terminal
         .draw(|frame| {
             render_dashboard(
@@ -249,9 +248,15 @@ fn live_trend_clears_stale_tall_bar_cells_between_frames() {
         .unwrap();
     let right_inner_x = right_border_x - 1;
 
-    assert_eq!(grid[title_y + 1][right_inner_x], " ");
-    assert_eq!(grid[title_y + 2][right_inner_x], " ");
-    assert_eq!(grid[title_y + 3][right_inner_x], "▏");
+    // The tall bar from the first frame occupied the rightmost column (all
+    // 4 inner rows). After the window slid two buckets left, that column
+    // must be fully cleared; the surviving bar now sits two columns over.
+    for row in &grid[title_y + 1..title_y + 5] {
+        assert_eq!(row[right_inner_x], " ");
+        assert_eq!(row[right_inner_x - 1], " ");
+    }
+    assert_eq!(grid[title_y + 1][right_inner_x - 2], "▏");
+    assert_eq!(grid[title_y + 4][right_inner_x - 2], "▏");
 }
 
 #[test]
