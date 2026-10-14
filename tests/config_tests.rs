@@ -27,17 +27,12 @@ wire_api = "responses"
 
     let settings = load_settings_from_path(&config_path).unwrap();
 
-    assert_eq!(settings.provider, "crs");
     assert_eq!(settings.root_url, "http://crs.example.invalid:6868");
-    assert_eq!(
-        settings.raw_base_url,
-        "http://crs.example.invalid:6868/openai/"
-    );
     assert!(settings.api_key.starts_with("test-api"));
 }
 
 #[test]
-fn resolves_apikey_method_from_codex_auth_json() {
+fn loads_api_key_without_preferred_auth_method() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config.toml");
     let auth_path = dir.path().join("auth.json");
@@ -45,7 +40,6 @@ fn resolves_apikey_method_from_codex_auth_json() {
         &config_path,
         r#"
 model_provider = "crs"
-preferred_auth_method = "apikey"
 
 [model_providers.crs]
 base_url = "http://crs.example.invalid:6868/openai/"
@@ -69,7 +63,7 @@ wire_api = "responses"
 }
 
 #[test]
-fn rejects_using_preferred_auth_method_as_api_key() {
+fn does_not_use_config_values_as_api_key() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config.toml");
     fs::write(
@@ -88,7 +82,7 @@ base_url = "http://crs.example.invalid:6868/openai/"
         .unwrap_err()
         .to_string();
 
-    assert!(err.contains("unsupported preferred_auth_method"));
+    assert!(err.contains("auth.json"));
     assert!(!err.contains("test-api-key"));
 }
 

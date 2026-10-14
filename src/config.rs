@@ -9,17 +9,13 @@ use std::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
-    pub config_path: PathBuf,
-    pub provider: String,
     pub root_url: String,
-    pub raw_base_url: String,
     pub api_key: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct CodexConfig {
     model_provider: Option<String>,
-    preferred_auth_method: Option<String>,
     model_providers: Option<HashMap<String, ProviderConfig>>,
 }
 
@@ -54,20 +50,13 @@ pub fn load_settings_from_path(path: &Path) -> Result<Settings> {
     let provider_cfg = providers
         .get(&provider)
         .ok_or_else(|| anyhow!("Codex config missing [model_providers.{provider}]"))?;
-    let raw_base_url = provider_cfg
+    let base_url = provider_cfg
         .base_url
-        .clone()
+        .as_deref()
         .ok_or_else(|| anyhow!("[model_providers.{provider}] missing base_url"))?;
-    let auth_method = cfg
-        .preferred_auth_method
-        .ok_or_else(|| anyhow!("Codex config missing preferred_auth_method"))?;
-    let api_key = resolve_api_key(path, &auth_method)?;
     Ok(Settings {
-        config_path: path.to_path_buf(),
-        provider,
-        root_url: normalize_root_url(&raw_base_url)?,
-        raw_base_url,
-        api_key,
+        root_url: normalize_root_url(base_url)?,
+        api_key: read_api_key(path)?,
     })
 }
 
@@ -75,17 +64,8 @@ pub fn load_settings(path: Option<PathBuf>) -> Result<Settings> {
     load_settings_from_path(&path.unwrap_or_else(default_config_path))
 }
 
-fn resolve_api_key(config_path: &Path, auth_method: &str) -> Result<String> {
-    if auth_method != "apikey" {
-        return Err(anyhow!(
-            "unsupported preferred_auth_method: expected apikey"
-        ));
-    }
-
-    let auth_dir = config_path
-        .parent()
-        .ok_or_else(|| anyhow!("config path has no parent directory"))?;
-    let auth_path = auth_dir.join("auth.json");
+fn read_api_key(config_path: &Path) -> Result<String> {
+    let auth_path = config_path.with_file_name("auth.json");
     let text =
         fs::read_to_string(&auth_path).with_context(|| format!("read {}", auth_path.display()))?;
     let auth: AuthJson =
